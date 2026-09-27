@@ -3,31 +3,251 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>税务稽查案件与复议流程</title>
+  <title>税务稽查案件与涉刑移送流程</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
-    main { max-width: 960px; margin: auto; }
-    button { padding: .55rem .9rem; cursor: pointer; }
-    pre { background: #f4f6f8; padding: 1rem; overflow: auto; border-radius: 8px; }
-    .row { display: flex; gap: 1rem; align-items: center; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 1.5rem; color: #17212b; background: #f7f9fb; }
+    main { max-width: 1180px; margin: auto; }
+    h1 { font-size: 1.35rem; }
+    h2 { font-size: 1.05rem; margin: .4rem 0; }
+    .layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1rem; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+    table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+    th, td { border-bottom: 1px solid #edf0f3; padding: .4rem .5rem; text-align: left; vertical-align: top; }
+    th { background: #f4f6f8; }
+    tr.active { background: #eef6ff; }
+    button { padding: .4rem .75rem; cursor: pointer; border: 1px solid #3b6fb6; background: #3b6fb6; color: #fff; border-radius: 6px; font-size: .85rem; }
+    button.secondary { background: #fff; color: #3b6fb6; }
+    button.danger { background: #b64b3b; border-color: #b64b3b; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    input, textarea, select { width: 100%; box-sizing: border-box; padding: .35rem .5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: .85rem; margin-top: .2rem; }
+    label { font-size: .8rem; color: #475569; display: block; margin: .45rem 0; }
+    .badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .75rem; background: #e2e8f0; }
+    .badge.open { background: #fef3c7; }
+    .badge.lock { background: #fee2e2; color: #b91c1c; }
+    .badge.done { background: #dcfce7; color: #166534; }
+    .muted { color: #64748b; font-size: .8rem; }
+    pre { background: #0f172a; color: #e2e8f0; padding: .8rem; overflow: auto; border-radius: 8px; font-size: .78rem; max-height: 320px; }
+    .toolbar { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin-bottom: .6rem; }
+    .todo-group { margin-bottom: .6rem; }
+    .todo-item { border: 1px dashed #cbd5e1; border-radius: 6px; padding: .45rem .6rem; margin: .3rem 0; font-size: .82rem; cursor: pointer; }
+    .todo-item:hover { background: #f1f5f9; }
+    .reason { color: #b91c1c; }
+    .ledger-ver { border-left: 3px solid #3b6fb6; padding: .35rem .7rem; margin: .4rem 0; background: #f8fafc; font-size: .82rem; }
+    .ledger-ver.old { border-left-color: #94a3b8; opacity: .85; }
   </style>
 </head>
 <body>
 <main>
-  <h1>税务稽查案件与复议流程</h1>
-  <p>最小演示页。完整业务流程通过README中的JSON接口调用。</p>
-  <div class="row"><button id="load">加载记录</button><button id="stats">查看状态统计</button></div>
-  <pre id="output">点击上方按钮读取服务状态。</pre>
+  <h1>税务稽查案件与涉刑移送流程</h1>
+  <div class="layout">
+    <section>
+      <div class="card">
+        <div class="toolbar">
+          <button id="refresh">刷新案件</button>
+          <button id="todos" class="secondary">移送待办</button>
+          <input id="newRef" placeholder="新案件reference，如 TAX-26010" style="width:170px">
+          <button id="create" class="secondary">创建示例案件(大额)</button>
+        </div>
+        <table id="recordTable">
+          <thead><tr><th>ID</th><th>Reference</th><th>纳税人</th><th>差额</th><th>状态</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card" id="detailCard" style="display:none">
+        <h2>案件详情 <span id="detailRef"></span></h2>
+        <div id="detailBody" class="muted"></div>
+        <h2 style="margin-top:.8rem">可用操作</h2>
+        <div id="actions"></div>
+        <pre id="result">执行结果将显示在此。</pre>
+      </div>
+    </section>
+    <section>
+      <div class="card">
+        <h2>移送待办</h2>
+        <div id="todoBody" class="muted">点击"移送待办"加载。</div>
+      </div>
+      <div class="card" id="ledgerCard" style="display:none">
+        <h2>涉刑移送台账（含历次版本）</h2>
+        <div id="ledgerBody"></div>
+      </div>
+    </section>
+  </div>
 </main>
 <script>
-const headers = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo"};
-async function show(path) {
-  const response = await fetch(path, {headers});
-  const data = await response.json();
-  document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+const H = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo","Content-Type":"application/json"};
+const STATE_LABEL = {
+  opened:"已立案", investigating:"调查中", proposed:"已提建议", reviewed:"复核完成", appealed:"复议中",
+  transfer_pending:"待负责人确认移送", awaiting_dispatch:"已确认待发出", awaiting_transfer:"待移送结果(锁定)",
+  supplementing:"退回补证中", transfer_accepted:"公安已受理", closed:"已结案"
+};
+let current = null;
+
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({headers: H}, opts || {}));
+  const data = await res.json();
+  if (!res.ok) throw new Error((data.error||"error") + ": " + (data.message||""));
+  return data;
 }
-document.getElementById("load").onclick = () => show("/api/records?limit=20");
-document.getElementById("stats").onclick = () => show("/api/stats");
+function showResult(data) { document.getElementById("result").textContent = JSON.stringify(data, null, 2); }
+function badge(state) {
+  const lock = ["transfer_pending","awaiting_dispatch","awaiting_transfer","supplementing"].includes(state);
+  const done = ["closed","transfer_accepted"].includes(state);
+  const cls = lock ? "lock" : (done ? "done" : "open");
+  return '<span class="badge %s">%s</span>'.replace("%s", cls).replace("%s", STATE_LABEL[state] || state);
+}
+function money(v) { return "¥" + (Number(v||0)).toLocaleString("zh-CN", {minimumFractionDigits:2}); }
+
+async function loadRecords(activeId) {
+  const data = await api("/api/records?limit=50");
+  const tb = document.querySelector("#recordTable tbody");
+  tb.innerHTML = data.items.map(r => `
+    <tr data-id="${r.id}" class="${activeId===r.id?'active':''}" style="cursor:pointer">
+      <td>${r.id}</td><td>${r.reference}</td><td>${r.payload.taxpayer}</td>
+      <td>${money(r.payload.tax_difference)}</td><td>${badge(r.state)}</td>
+    </tr>`).join("");
+  tb.querySelectorAll("tr").forEach(tr => tr.onclick = () => selectRecord(Number(tr.dataset.id)));
+}
+
+async function selectRecord(id) {
+  current = await api("/api/records/" + id);
+  document.getElementById("detailCard").style.display = "";
+  document.getElementById("ledgerCard").style.display = "";
+  document.getElementById("detailRef").textContent = current.reference;
+  const p = current.payload;
+  const clues = [p.hidden_income?"隐瞒收入":"", p.destroyed_records?"销毁资料":""].filter(Boolean).join("、") || "无";
+  document.getElementById("detailBody").innerHTML = `
+    纳税人：${p.taxpayer}｜税期：${p.tax_period}｜状态：${badge(current.state)}<br>
+    申报税额：${money(p.declared_tax)}｜核定税额：${money(p.assessed_tax)}｜补税差额：<b>${money(p.tax_difference)}</b><br>
+    应补合计（含滞纳金/罚款）：${money(p.total_due)}｜涉刑线索：${clues}
+    ${p.return_reason ? `<br><span class="reason">最近退回原因：${p.return_reason}；补证要求：${p.supplement_required||""}；已重新核定：${p.reassessed_after_return?"是":"否"}</span>` : ""}
+    ${p.police_case_no ? `<br>公安立案号：${p.police_case_no}` : ""}`;
+  renderActions();
+  await loadLedger(id);
+  await loadRecords(id);
+}
+
+function btn(label, fn, cls) {
+  const b = document.createElement("button");
+  b.textContent = label; b.className = cls || "";
+  b.onclick = fn;
+  return b;
+}
+function inputHtml(id, label, placeholder, area) {
+  return `<label>${label}<${area?"textarea":"input"} id="${id}" placeholder="${placeholder||""}"></${area?"textarea":"input"}></label>`;
+}
+
+async function doAction(action, body) {
+  try {
+    const rec = await api(`/api/records/${current.id}/actions/${action}`, {method:"POST", body: JSON.stringify(Object.assign({expected_version: current.version}, body))});
+    showResult(rec);
+    await selectRecord(current.id);
+    await loadTodos();
+  } catch (e) { showResult({error: String(e.message)}); }
+}
+
+function renderActions() {
+  const box = document.getElementById("actions");
+  box.innerHTML = "";
+  const s = current.state;
+  const add = (label, fn, cls) => box.appendChild(btn(label, fn, cls));
+  if (s === "opened") add("开始调查", () => doAction("investigate", {data:{}, data2:0}));
+  if (s === "investigating") {
+    add("提出行政处理建议", () => doAction("propose", {proposal: prompt("处理建议内容","补税并处罚")||"补税并处罚"}));
+    add("发起涉刑移送建议", () => {
+      doAction("transfer_propose", {proposal_note: prompt("移送建议说明（税额超50万/隐瞒/销毁）","稽查发现涉嫌逃税，建议移送公安")||"", clue_detail: current.payload.criminal_clues||""});
+    }, "danger");
+  }
+  if (s === "proposed") add("复核", () => doAction("review", {outcome:"accepted", review_note:"证据充分"}));
+  if (s === "reviewed") {
+    add("结案(普通)", () => doAction("close", {final_decision: prompt("最终决定","维持处理决定")||"维持"}));
+    add("发起涉刑移送建议", () => doAction("transfer_propose", {proposal_note: prompt("移送建议说明","复核发现涉嫌逃税，建议移送")||""}), "danger");
+  }
+  if (s === "appealed") {
+    add("发起涉刑移送建议", () => doAction("transfer_propose", {proposal_note:"复议阶段发现涉刑线索，建议移送"}), "danger");
+  }
+  if (s === "transfer_pending") {
+    add("负责人确认并生成移送编号", async () => {
+      const note = prompt("确认意见","同意移送，生成唯一编号") || "同意移送";
+      await doAction("transfer_confirm", {confirmed:true, confirm_note: note});
+    });
+    add("负责人驳回", () => {
+      const note = prompt("驳回意见","证据不足");
+      if (note) doAction("transfer_reject", {reject_note: note});
+    }, "secondary");
+  }
+  if (s === "awaiting_dispatch") {
+    add("移送发出", () => doAction("transfer_send", {recipient_org: prompt("接收公安机关","市公安局经侦支队")||"市公安局经侦支队", deliver_channel:"现场移交"}));
+  }
+  if (s === "awaiting_transfer") {
+    box.appendChild(Object.assign(document.createElement("p"), {className:"muted", textContent:"案件停在待移送结果，不能提前结案。"}));
+    add("公安受理立案", () => doAction("transfer_result", {outcome:"accepted", police_case_no: prompt("公安立案号","A2026-0091")||"", result_note:"公安受理立案"}));
+    add("公安退回补证", () => {
+      const reason = prompt("退回原因","账证不全，需补充资金流水");
+      const need = prompt("补证要求","补充银行流水和合同凭证");
+      if (reason && need) doAction("transfer_return", {return_reason: reason, supplement_required: need, police_org:"市公安局经侦支队"});
+    }, "danger");
+  }
+  if (s === "supplementing") {
+    add("重新核定税额", async () => {
+      const assessed = Number(prompt("重新核定后的税额", current.payload.assessed_tax));
+      const note = prompt("核定说明","补充流水后重新核定");
+      if (assessed) await doAction("transfer_reassess", {assessed_tax: assessed, reassess_note: note||"重新核定"});
+    });
+    add("再次移送(新版本)", async () => {
+      await doAction("transfer_propose", {proposal_note: prompt("再次移送说明","补证后重新核定，再次移送")||"补证后再次移送"});
+    }, "danger");
+  }
+  if (s === "transfer_accepted") add("结案", () => doAction("close", {final_decision:"公安已立案，税务程序结案"}));
+}
+
+async function loadLedger(id) {
+  const data = await api("/api/transfers?record_id=" + id);
+  const body = document.getElementById("ledgerBody");
+  if (!data.items.length) { body.innerHTML = '<span class="muted">暂无移送记录。</span>'; return; }
+  const statusMap = {proposed:"已建议", confirmed:"已确认(编号已生成)", sent:"已发出/待结果", returned:"已退回补证", accepted:"公安已受理", rejected:"已驳回"};
+  body.innerHTML = data.items.map((t, i) => `
+    <div class="ledger-ver ${i>0?'old':''}">
+      <b>第${t.round}版</b>｜编号：<code>${t.transfer_no}</code>｜状态：${statusMap[t.status]||t.status}
+      ${t.retransfer?'｜<span class="reason">再次移送版本</span>':''}<br>
+      涉嫌金额：${money(t.suspected_amount)}｜依据：${(t.basis.reasons||[]).join("、")||"-"}
+      ${t.return_reason?`<br><span class="reason">退回原因：${t.return_reason}；补证要求：${t.supplement_required||""}</span>`:""}
+      ${t.reassessed_amount!=null?`<br>重新核定差额：${money(t.reassessed_amount)}（${t.reassess_note||""}）`:""}
+      ${t.police_case_no?`<br>公安立案号：${t.police_case_no}`:""}
+    </div>`).join("");
+}
+
+async function loadTodos() {
+  const data = await api("/api/transfer-todos");
+  const names = {to_confirm:"待负责人确认", to_dispatch:"待移送发出", awaiting_result:"待移送结果(案件锁定)", to_reassess:"待补证/重新核定"};
+  const body = document.getElementById("todoBody");
+  body.innerHTML = Object.entries(data.groups).map(([k, items]) => `
+    <div class="todo-group"><b>${names[k]}</b>（${items.length}）
+      ${items.map(t => `<div class="todo-item" data-id="${t.record_id}">
+        ${t.transfer_no}｜第${t.round}版｜${t.reference}
+        ${t.return_reason?`<br><span class="reason">退回原因：${t.return_reason}</span>`:""}
+      </div>`).join("") || '<div class="muted">无</div>'}
+    </div>`).join("");
+  body.querySelectorAll(".todo-item").forEach(el => el.onclick = () => selectRecord(Number(el.dataset.id)));
+}
+
+document.getElementById("refresh").onclick = () => loadRecords(current?current.id:null);
+document.getElementById("todos").onclick = loadTodos;
+document.getElementById("create").onclick = async () => {
+  const ref = document.getElementById("newRef").value.trim() || ("TAX-" + Date.now().toString().slice(-5));
+  try {
+    const rec = await api("/api/records", {method:"POST", body: JSON.stringify({reference: ref, data: {
+      taxpayer: "Example Ltd", tax_period: "2025-Q4",
+      declared_tax: 300000, assessed_tax: 1000000, penalty_rate: 0.3,
+      evidence_count: 5, days_late: 120, appeal_deadline_day: 60,
+      hidden_income: true, destroyed_records: false, criminal_clues: "私人账户收款隐匿收入"
+    }})});
+    showResult(rec);
+    await loadRecords();
+  } catch (e) { showResult({error: String(e.message)}); }
+};
+
+loadRecords();
+loadTodos();
 </script>
 </body>
 </html>
