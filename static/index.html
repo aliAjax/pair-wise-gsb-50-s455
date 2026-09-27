@@ -8,8 +8,12 @@
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
     main { max-width: 960px; margin: auto; }
     button { padding: .55rem .9rem; cursor: pointer; }
+    input { padding: .5rem; width: 6rem; }
     pre { background: #f4f6f8; padding: 1rem; overflow: auto; border-radius: 8px; }
-    .row { display: flex; gap: 1rem; align-items: center; }
+    table { border-collapse: collapse; margin: 1rem 0; width: 100%; }
+    th, td { border: 1px solid #d4dbe3; padding: .4rem .6rem; text-align: left; font-size: .9rem; }
+    th { background: #eef2f6; }
+    .row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
   </style>
 </head>
 <body>
@@ -17,17 +21,47 @@
   <h1>税务稽查案件与复议流程</h1>
   <p>最小演示页。完整业务流程通过README中的JSON接口调用。</p>
   <div class="row"><button id="load">加载记录</button><button id="stats">查看状态统计</button></div>
+  <h2>涉刑移送</h2>
+  <div class="row">
+    <button id="transfers">移送台账</button>
+    <button id="todo">移送待办</button>
+    <input id="rid" type="number" min="1" placeholder="案件ID">
+    <button id="record-transfers">查案件移送记录</button>
+  </div>
+  <div id="table"></div>
   <pre id="output">点击上方按钮读取服务状态。</pre>
 </main>
 <script>
 const headers = {"X-User-Id":"demo-admin","X-Role":"admin","X-Org":"demo"};
+const STATE_LABELS = {proposed:"待确认编号", confirmed:"待发出移送", sent:"待移送结果", accepted:"公安已受理", returned:"退回补证"};
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+}
 async function show(path) {
   const response = await fetch(path, {headers});
   const data = await response.json();
+  document.getElementById("table").innerHTML = "";
+  document.getElementById("output").textContent = JSON.stringify(data, null, 2);
+}
+function renderTransfers(items) {
+  if (!items.length) return "<p>暂无移送记录。</p>";
+  const rows = items.map(t => "<tr><td>" + esc(t.transfer_no || "未编号") + "</td><td>" + esc(t.record_reference) + "</td><td>" + esc(t.taxpayer) + "</td><td>第" + esc(t.version) + "次</td><td>" + esc(STATE_LABELS[t.state] || t.state) + "</td><td>" + esc(t.todo || "") + "</td><td>" + esc(t.return_reason || "") + "</td><td>" + esc(t.updated_at) + "</td></tr>").join("");
+  return "<table><thead><tr><th>移送编号</th><th>案件号</th><th>纳税人</th><th>版本</th><th>状态</th><th>待办</th><th>退回原因</th><th>更新时间</th></tr></thead><tbody>" + rows + "</tbody></table>";
+}
+async function showTransfers(path) {
+  const response = await fetch(path, {headers});
+  const data = await response.json();
+  document.getElementById("table").innerHTML = renderTransfers(data.items || []);
   document.getElementById("output").textContent = JSON.stringify(data, null, 2);
 }
 document.getElementById("load").onclick = () => show("/api/records?limit=20");
 document.getElementById("stats").onclick = () => show("/api/stats");
+document.getElementById("transfers").onclick = () => showTransfers("/api/transfers?limit=50");
+document.getElementById("todo").onclick = () => showTransfers("/api/transfers/todo?limit=50");
+document.getElementById("record-transfers").onclick = () => {
+  const id = document.getElementById("rid").value;
+  if (id) showTransfers("/api/records/" + encodeURIComponent(id) + "/transfers");
+};
 </script>
 </body>
 </html>

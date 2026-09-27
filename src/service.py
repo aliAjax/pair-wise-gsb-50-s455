@@ -52,6 +52,7 @@ class Service:
         record = self.repository.get(record_id)
         self.rules.require_transition(record, action)
         new_state, new_payload, summary = self.rules.apply_action(record, action, data or {})
+        transfer = self.rules.transfer_effect(action, new_payload, data or {})
         return self.repository.mutate(
             record_id=record_id,
             expected_version=int(expected_version),
@@ -60,7 +61,23 @@ class Service:
             actor_id=actor.user_id,
             action=action,
             details={"summary": summary, "input": data or {}, "from": record["state"], "to": new_state},
+            transfer=transfer,
         )
+
+    def list_transfers(self, actor: Actor, state: Optional[str] = None, record_id: Optional[int] = None, limit: int = 100) -> List[Dict[str, Any]]:
+        actor = self._actor(actor)
+        self._ensure_known_role(actor)
+        return self.repository.list_transfers(state=state, record_id=record_id, limit=limit)
+
+    def transfer_todo(self, actor: Actor, limit: int = 100) -> List[Dict[str, Any]]:
+        actor = self._actor(actor)
+        self._ensure_known_role(actor)
+        return self.repository.transfer_todo(limit=limit)
+
+    def record_transfers(self, actor: Actor, record_id: int) -> List[Dict[str, Any]]:
+        actor = self._actor(actor)
+        self._ensure_known_role(actor)
+        return self.repository.record_transfers(record_id)
 
     def timeline(self, actor: Actor, record_id: int) -> List[Dict[str, Any]]:
         actor = self._actor(actor)
